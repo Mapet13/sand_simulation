@@ -5,7 +5,8 @@ use sdl2::{
 };
 
 const SCALE: usize = 1;
-const GRID_SIZE: [usize; 2] = [600 / SCALE, 600 / SCALE];
+const WINDOW_SIZE: [u32; 2] = [600, 600];
+const GRID_SIZE: [usize; 2] = [WINDOW_SIZE[0] as usize / SCALE, WINDOW_SIZE[1] as usize / SCALE];
 
 const GRAVITY: f64 = 0.9;
 
@@ -21,7 +22,7 @@ pub enum FieldState {
 
 impl FieldState {
     fn is_empty(&self) -> bool {
-        match *self {
+        match self {
             FieldState::Empty => true,
             _ => false,
         }
@@ -53,6 +54,8 @@ impl Particle {
         }
     }
 }
+
+
 
 fn set_color(kind: FieldState) -> Color {
     match kind {
@@ -86,23 +89,20 @@ impl App {
     fn render(&self, canvas: &mut Canvas<Window>) {
         self.particles.iter().for_each(|p| {
             canvas.set_draw_color(p.color);
-            canvas
-                .fill_rect::<_>(Rect::new(
+            let _ = canvas.fill_rect::<_>(Rect::new(
                     (p.pos[0] * SCALE) as i32,
                     (p.pos[1] * SCALE) as i32,
                     SCALE as u32,
                     SCALE as u32,
-                ))
-                .unwrap();
+                ));
         });
     }
 
     fn set_adding(&mut self, con: bool, state: FieldState) {
-        if !con && state == self.current_adding {
-            self.current_adding = FieldState::Empty;
-        }
-        if con && FieldState::Empty == self.current_adding {
-            self.current_adding = state;
+        match (con, self.current_adding) {
+            (false, s) if s == state => self.current_adding = FieldState::Empty,
+            (true, FieldState::Empty) => self.current_adding = state,
+            _ => {},
         }
     }
 
@@ -177,50 +177,34 @@ impl App {
         ParticleUpdateState::Stable
     }
     
-    fn update_movable_particle(
-        &mut self,
-        id: usize,
-        update_particle_fn: &mut dyn std::ops::FnMut(
-            &mut App,
-            usize,
-            usize,
-            [usize; 2],
-        ) -> ParticleUpdateState,
-    ) {
+    fn update_movable_particle(&mut self, id: usize,
+        update_particle_fn: &mut dyn FnMut(&mut App, usize, usize, [usize; 2]) -> ParticleUpdateState) 
+    {
+        self.particles[id].velocity += GRAVITY;
         for _ in 0..(self.particles[id].velocity as usize) {
             let [x, y] = self.particles[id].pos;
             let grid_id = get_id_from_pos(x, y);
             match update_particle_fn(self, id, grid_id, [x, y]) {
-                ParticleUpdateState::Moving => {
-                    continue;
-                }
-                ParticleUpdateState::Stopped => {
-                    return;
-                }
+                ParticleUpdateState::Stopped => return,
                 ParticleUpdateState::Stable => {
                     self.particles[id].velocity = 1.0;
                     return;
                 }
+                ParticleUpdateState::Moving => {}
             };
         }
+        self.particles[id].updated = true;
     }
 
     fn update_particle_pos(&mut self) {
-        for i in 0..self.particles.len() {
-            let i = self.particles.len() - 1 - i;
-            match self.particles[i].kind {
-                FieldState::Sand(_) if !self.particles[i].updated => {
-                    self.particles[i].velocity += GRAVITY;
-                    self.update_movable_particle(i, &mut App::update_sand);
-                    self.particles[i].updated = true;
-                }
-                FieldState::Water(_) if !self.particles[i].updated => {
-                    self.particles[i].velocity += GRAVITY;
-                    self.update_movable_particle(i, &mut App::update_water);
-                    self.particles[i].updated = true;
-                }
-                _ => {}
-            };
+        for id in (0..self.particles.len()).rev() {
+            if !self.particles[id].updated {
+                match self.particles[id].kind {
+                    FieldState::Sand(_) => self.update_movable_particle(id, &mut App::update_sand),
+                    FieldState::Water(_) => self.update_movable_particle(id, &mut App::update_water),
+                    _ => {}
+                };
+            }
         }
     }
 
@@ -229,8 +213,8 @@ impl App {
             return;
         }
 
-        let dist = |ax: usize, ay: usize, bx: usize, by: usize| -> f32 {
-            ((ax as f32 - bx as f32).powi(2) + (ay as f32 - by as f32).powi(2)).sqrt()
+        let distance_between = |a: [usize; 2], b: [usize; 2]| -> f32 {
+            ((a[0] as f32 - b[0] as f32).powi(2) + (a[1] as f32 - b[1] as f32).powi(2)).sqrt()
         };
 
         let radius = 12;
@@ -250,7 +234,7 @@ impl App {
         if let FieldState::Wood(_) = self.current_adding {
             for x in (pos_x - radius)..(pos_x + radius) {
                 for y in (pos_y - radius)..(pos_y + radius) {
-                    if dist(pos_x, pos_y, x, y) < radius as f32 {
+                    if distance_between([pos_x, pos_y], [x, y]) < radius as f32 {
                         let id = get_id_from_pos(x, y);
                         if self.grid[id].is_empty() {
                             self.add_particle(id, [x, y], FieldState::Wood(self.particles.len()));
@@ -267,16 +251,12 @@ impl App {
             let x = rng.gen_range(pos_x - radius, pos_x + radius);
             let y = rng.gen_range(pos_y - radius, pos_y + radius);
 
-            if dist(pos_x, pos_y, x, y) < radius as f32 {
+            if distance_between([pos_x, pos_y], [x, y]) < radius as f32 {
                 let id = get_id_from_pos(x, y);
                 if self.grid[id].is_empty() {
                     match self.current_adding {
-                        FieldState::Sand(_) => {
-                            self.add_particle(id, [x, y], FieldState::Sand(self.particles.len()))
-                        }
-                        FieldState::Water(_) => {
-                            self.add_particle(id, [x, y], FieldState::Water(self.particles.len()))
-                        }
+                        FieldState::Sand(_) => self.add_particle(id, [x, y], FieldState::Sand(self.particles.len())),
+                        FieldState::Water(_) => self.add_particle(id, [x, y], FieldState::Water(self.particles.len())),
                         _ => {}
                     };
                 }
@@ -301,7 +281,7 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("sand", 600, 600)
+        .window("sand", WINDOW_SIZE[0], WINDOW_SIZE[1])
         .position_centered()
         .build()
         .unwrap();
