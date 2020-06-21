@@ -30,7 +30,7 @@ impl FieldState {
 
 enum ParticleUpdateState {
     Moving,
-    Stoped,
+    Stopped,
     Stable,
 }
 
@@ -155,7 +155,7 @@ impl App {
         if (x > 0                && self.sand_case(grid_id, id, x - 1, y + 1))
         || (x < GRID_SIZE[1] - 1 && self.sand_case(grid_id, id, x + 1, y + 1))
         {
-            return ParticleUpdateState::Stoped;
+            return ParticleUpdateState::Stopped;
         }
         ParticleUpdateState::Stable
     }
@@ -172,7 +172,7 @@ impl App {
         || (x < GRID_SIZE[1] - 1 && self.standard_case(grid_id, id, x + 1, y))
         || (x > 0                && self.standard_case(grid_id, id, x - 1, y))
         {
-            return ParticleUpdateState::Stoped;
+            return ParticleUpdateState::Stopped;
         }
         ParticleUpdateState::Stable
     }
@@ -194,7 +194,7 @@ impl App {
                 ParticleUpdateState::Moving => {
                     continue;
                 }
-                ParticleUpdateState::Stoped => {
+                ParticleUpdateState::Stopped => {
                     return;
                 }
                 ParticleUpdateState::Stable => {
