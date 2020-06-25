@@ -1,7 +1,7 @@
 use rand::Rng;
 use sdl2::{
     event::Event, keyboard::Keycode, mouse::MouseButton, pixels::Color, rect::Rect, render::Canvas,
-    video::Window,
+    video::Window, EventPump
 };
 
 const SCALE: usize = 1;
@@ -55,8 +55,6 @@ impl Particle {
     }
 }
 
-
-
 fn set_color(kind: FieldState) -> Color {
     match kind {
         FieldState::Sand(_) => Color::RGB(237, 201, 175),
@@ -70,13 +68,13 @@ fn get_id_from_pos(x: usize, y: usize) -> usize {
     x + GRID_SIZE[0] * y
 }
 
-pub struct App {
+struct Simulator {
     particles: Vec<Particle>,
     current_adding: FieldState,
     grid: Vec<FieldState>,
 }
 
-impl App {
+impl Simulator {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
@@ -86,7 +84,7 @@ impl App {
         }
     }
 
-    fn render(&self, canvas: &mut Canvas<Window>) {
+    pub fn render(&self, canvas: &mut Canvas<Window>) {
         self.particles.iter().for_each(|p| {
             canvas.set_draw_color(p.color);
             let _ = canvas.fill_rect::<_>(Rect::new(
@@ -98,7 +96,7 @@ impl App {
         });
     }
 
-    fn set_adding(&mut self, con: bool, state: FieldState) {
+    pub fn set_adding(&mut self, con: bool, state: FieldState) {
         match (con, self.current_adding) {
             (false, s) if s == state => self.current_adding = FieldState::Empty,
             (true, FieldState::Empty) => self.current_adding = state,
@@ -106,7 +104,7 @@ impl App {
         }
     }
 
-    fn update(&mut self, mouse_pos: [usize; 2]) {
+    pub fn update(&mut self, mouse_pos: [usize; 2]) {
         self.update_particle_pos();
         self.add_particles(mouse_pos);
         self.reset_updated_status();
@@ -178,7 +176,7 @@ impl App {
     }
     
     fn update_movable_particle(&mut self, id: usize,
-        update_particle_fn: &mut dyn FnMut(&mut App, usize, usize, [usize; 2]) -> ParticleUpdateState) 
+        update_particle_fn: &mut dyn FnMut(&mut Simulator, usize, usize, [usize; 2]) -> ParticleUpdateState) 
     {
         self.particles[id].velocity += GRAVITY;
         for _ in 0..(self.particles[id].velocity as usize) {
@@ -200,8 +198,8 @@ impl App {
         for id in (0..self.particles.len()).rev() {
             if !self.particles[id].updated {
                 match self.particles[id].kind {
-                    FieldState::Sand(_) => self.update_movable_particle(id, &mut App::update_sand),
-                    FieldState::Water(_) => self.update_movable_particle(id, &mut App::update_water),
+                    FieldState::Sand(_) => self.update_movable_particle(id, &mut Simulator::update_sand),
+                    FieldState::Water(_) => self.update_movable_particle(id, &mut Simulator::update_water),
                     _ => {}
                 };
             }
@@ -276,61 +274,90 @@ impl App {
     }
 }
 
-fn main() {
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem
-        .window("sand", WINDOW_SIZE[0], WINDOW_SIZE[1])
-        .position_centered()
-        .build()
-        .unwrap();
+pub struct App {
+    pub running: bool,
+    simulator: Simulator,
+    canvas: Canvas<Window>,
+    event_pump: EventPump,
+    mouse_pos: [i32; 2],
+}
 
-    let mut app = App::new();
-    let mut canvas = window.into_canvas().build().unwrap();
+impl App {
+    pub fn new() -> Self {
+        let sdl_context = sdl2::init().unwrap();
+        let video_subsystem = sdl_context.video().unwrap();
+        let window = video_subsystem
+            .window("sand", WINDOW_SIZE[0], WINDOW_SIZE[1])
+            .position_centered()
+            .build()
+            .unwrap();
 
-    let mut mouse_pos = [0, 0];
+        let mut app = App {
+            simulator: Simulator::new(),
+            running: true,
+            event_pump: sdl_context.event_pump().unwrap(),
+            canvas: window.into_canvas().build().unwrap(),
+            mouse_pos: [0, 0],
+        };
 
-    canvas.set_draw_color(Color::RGB(0, 0, 0));
-    canvas.clear();
-    canvas.present();
-    let mut event_pump = sdl_context.event_pump().unwrap();
-    'running: loop {
-        for event in event_pump.poll_iter() {
+        app.render();
+
+        app
+    }
+
+    pub fn update(&mut self) {
+        self.simulator.update([self.mouse_pos[0] as usize / SCALE, self.mouse_pos[1] as usize / SCALE]);
+    }
+    
+    pub fn input(&mut self) {
+        for event in self.event_pump.poll_iter() {
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => break 'running,
+                } => self.running = false,
                 Event::MouseButtonDown {
                     mouse_btn, x, y, ..
                 } => {
-                    mouse_pos = [x, y];
+                    self.mouse_pos = [x, y];
                     match mouse_btn {
-                        MouseButton::Left => app.set_adding(true, FieldState::Sand(0)),
-                        MouseButton::Right => app.set_adding(true, FieldState::Water(0)),
-                        MouseButton::Middle => app.set_adding(true, FieldState::Wood(0)),
+                        MouseButton::Left => self.simulator.set_adding(true, FieldState::Sand(0)),
+                        MouseButton::Right => self.simulator.set_adding(true, FieldState::Water(0)),
+                        MouseButton::Middle => self.simulator.set_adding(true, FieldState::Wood(0)),
                         _ => {}
                     }
                 }
                 Event::MouseButtonUp { mouse_btn, .. } => match mouse_btn {
-                    MouseButton::Left => app.set_adding(false, FieldState::Sand(0)),
-                    MouseButton::Right => app.set_adding(false, FieldState::Water(0)),
-                    MouseButton::Middle => app.set_adding(false, FieldState::Wood(0)),
+                    MouseButton::Left => self.simulator.set_adding(false, FieldState::Sand(0)),
+                    MouseButton::Right => self.simulator.set_adding(false, FieldState::Water(0)),
+                    MouseButton::Middle => self.simulator.set_adding(false, FieldState::Wood(0)),
                     _ => {}
                 },
                 Event::MouseMotion { x, y, .. } => {
-                    mouse_pos = [x, y];
+                    self.mouse_pos = [x, y];
                 }
                 _ => {}
             }
         }
-        app.update([mouse_pos[0] as usize / SCALE, mouse_pos[1] as usize / SCALE]);
-
-        canvas.set_draw_color(BACKGROUND_COLOR);
-        canvas.clear();
-        app.render(&mut canvas);
-        canvas.present();
     }
+
+    pub fn render(&mut self) {
+        self.canvas.set_draw_color(BACKGROUND_COLOR);
+        self.canvas.clear();
+        self.simulator.render(&mut self.canvas);
+        self.canvas.present();
+    }
+}
+
+fn main() {
+    let mut app = App::new();
+    
+    while app.running {
+        app.input();
+        app.update();
+        app.render();
+    }
+
 }
