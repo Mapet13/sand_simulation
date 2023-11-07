@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 lazy_static = "1.4.0"
-sdl2 = { version = "0.34.1", features = ["bundled", "static-link"] }
-rand = "0.7.3"
+sdl2 = { version = "0.35.2", features = ["bundled", "static-link"] }
+rand = "0.8.5"

@@ -33,11 +33,11 @@ where
     }
 }
 
-impl<T> Into<[T; 2]> for Vec2<T>
+impl<T> From<Vec2<T>> for [T; 2]
 where
     T: Copy,
 {
-    fn into(self) -> [T; 2] {
-        [self.x, self.y]
+    fn from(vec2: Vec2<T>) -> Self {
+        [vec2.x, vec2.y]
     }
 }
